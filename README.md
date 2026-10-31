@@ -30,11 +30,25 @@ The result is a true **network**, not a tree: the same word can be a child in on
 
 | Module | 中文 | What it does |
 | --- | --- | --- |
-| Translation practice | 翻译练习 | Drill sentences drawn from your reading; self-grade recall, then reveal the reference. |
+| Translation practice | 翻译练习 | Drill sentences drawn from your reading; you translate back into English and an AI grader scores it on three weighted dimensions. |
 | Vocabulary | 词汇库 | Your personal word list with meanings, usage, and ratings. |
 | Reading | 外刊库 | Paste external articles; they are auto-split into 1:1 sentence pairs for practice. |
 | Association canvas | 关联库 | The draggable mesh: build hierarchy and synonym groups visually. |
 | Progress | 学习进度 | Analytics on what you have studied and how it is going. |
+
+## AI grading — the differentiator
+
+The translation practice doesn't just show you the reference sentence. If you provide your own AI key (OpenAI-compatible endpoint), the model grades your translation on **three weighted dimensions**:
+
+- **Grammar (语法) — 30%**
+- **Fluency (地道度) — 30%**
+- **Faithfulness (语义保真) — 40%**
+
+Faithfulness is weighted highest on purpose: a fluent sentence that says the wrong thing is worse than a slightly awkward one that stays true to the original. The grader also tells you which dimension is your weakest.
+
+No AI key? You still get the original sentence to compare against — no fake scores, no fake translations.
+
+Local-first: only the single sentence being scored ever leaves your machine.
 
 ## Screenshots
 
@@ -71,72 +85,13 @@ Both scripts are idempotent — re-running them just launches the app (the depen
 > automated test suite — **not** programs you open or execute.
 
 ### Prerequisites
+
 - Python **3.11+** (developed and tested on 3.13)
 - `pip`
 - Desktop window: a graphical environment (uses `pywebview`)
 - Frontend tests only: Node.js + `jsdom`
 
 ### Install
+
 ```bash
 pip install -r requirements.txt
-```
-*(`requirements.txt` pins exact, regression-verified versions, so `pip install -r requirements.txt` reproduces the tested environment.)*
-
-### Run — desktop
-```bash
-python run.py
-```
-Opens a single `pywebview` window (backend on `127.0.0.1:8765`).
-
-### Run — web
-```bash
-python web_server.py          # binds 0.0.0.0:8000; set PORT to change
-```
-
-### Your data
-The app starts with an **empty database**. Add words through the UI — your vocabulary, articles, and practice history are stored locally in a SQLite file, isolated per browser, with no personal information uploaded.
-
-The bundled demo corpus (`app/seed_data.py`) is **self-authored and copyright-clean** (no external-publication text). To load it for development or testing:
-```bash
-python -m app.seed --db ./demo.sqlite    # refuses to touch your real data
-```
-
-## Project layout
-
-**You run exactly one file** — `run.py` (desktop) or `web_server.py` (web).
-Everything else is code, tests, or assets. **Do not run** the files inside `app/`,
-`web/`, `tools/`, or `tests/` (the last one is the automated test suite).
-
-```
-my-english-vault/
-├── run.py                 # ★ THE APP — double-click start.bat, or: python run.py
-├── web_server.py          # Alternative entry: serves the web/ frontend over HTTP
-├── app/                   # Backend (FastAPI): database, vocabulary logic, AI, security
-├── web/                   # Frontend: index.html + app.js + style.css — the user interface
-├── tools/                 # Developer scripts (seed checker, build fingerprint…) — NOT needed to run
-├── tests/                 # Automated test suite (pytest + jsdom) — NOT the app
-├── assets/                # Images used by this README (screenshots, diagrams)
-├── requirements.txt       # Python dependencies (pinned to tested versions)
-├── requirements-web.txt   # Same, for the cloud/web deployment
-├── start.bat / start.sh   # One-click launchers (install deps + run the app)
-└── LICENSE / README.md
-```
-
-## Quality & tests
-
-**1,920 automated assertions, all green** — 1,825 backend checks across 22 test suites plus 95 frontend DOM checks.
-
-```bash
-pytest                           # backend
-npm install --no-save jsdom     # one-time
-node tests/test_frontend_links.js   # frontend DOM regression
-```
-
-## Made with
-
-MyEnglishVault is a personal project by **Jack Hever**.
-
-**Stack:** Python 3.11+ · FastAPI · SQLite · uvicorn · pywebview · Vanilla JavaScript
-
-## License
-[MIT](./LICENSE) © 2026 Jack Hever
