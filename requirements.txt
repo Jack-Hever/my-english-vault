@@ -1,0 +1,10 @@
+# 桌面版依赖 —— 已钉死到本地全量回归验证过的版本。
+# 升级前请先在本地跑 `pytest` + `node test_frontend_links.js` 全绿再改这里。
+# （云端版为何要把 starlette / requests 也钉死，见 requirements-web.txt 的注释。）
+fastapi==0.141.1
+starlette==1.6.0
+uvicorn==0.53.0
+pydantic==2.13.5
+pywebview==6.2.1
+requests==2.34.2
+apscheduler==3.11.3

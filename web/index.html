@@ -1,0 +1,1148 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="reading" data-layout="top">
+<!--
+  data-theme  = 色彩轴（7 套语义令牌）
+  data-layout = 骨架轴（导航位置 + 主区列结构）
+  两者作用域独立：换主题不必换骨架，换骨架不必换配色。
+  朴素(reading) 的骨架就是本应用原有骨架 —— data-layout="top"，一条额外规则都不加。
+-->
+<head>
+<meta charset="UTF-8">
+<title>我的英文库 MyEnglishVault</title>
+<!-- ★ 公网分享链接的访问令牌透传 ★
+     部署网关要求**每一个**请求都带 ?sharecode=XXX（含 style.css / app.js /
+     背景图 / 所有 /api/*）。分享链接形如
+       https://xxx.app.workbuddy.host/?sharecode=ABC
+     浏览器打开时令牌只在**首屏 URL** 上；页面里的相对链接和 fetch 不会自动带上，
+     于是静态资源与接口全部 403 → 评审看到的是一张没样式的白页。
+
+     这里的做法：把令牌存进 sessionStorage，然后
+       ① 补全 <link>/<img>/<script> 的 src/href（同源相对路径才补）
+       ② 包装 fetch，把同源请求的 URL 补上令牌
+     ★ 只在**同源**且带 sharecode 时才补 —— 外部链接、data: URI 绝不碰。
+     ★ 桌面版不受影响：没有 sharecode 参数，这段脚本什么都不做。
+-->
+<script>
+(function () {
+  'use strict';
+  var m = /[?&]sharecode=([^&#]+)/.exec(window.location.search || '');
+  if (!m) return;                                  // 桌面 / 直接访问：什么都不做
+  var code = decodeURIComponent(m[1]);
+  try { sessionStorage.setItem('enp_sharecode', code); } catch (e) { /* 隐私模式 */ }
+  function withCode(url) {
+    if (typeof url !== 'string' || !url) return url;
+    if (url.charAt(0) === '/' && url.charAt(1) === '/') return url;  // 协议相对
+    if (/^[a-z][a-z0-9+.-]*:/i.test(url)) return url;                 // 绝对 URL / data:
+    if (url.indexOf('sharecode=') >= 0) return url;                   // 已有令牌
+    var sep = url.indexOf('?') >= 0 ? '&' : '?';
+    return url + sep + 'sharecode=' + encodeURIComponent(code);
+  }
+  // ① 静态资源
+  var fix = function (root) {
+    var nodes = (root || document).querySelectorAll('link[href], img[src], script[src]');
+    for (var i = 0; i < nodes.length; i++) {
+      var el = nodes[i];
+      var attr = el.tagName === 'LINK' ? 'href' : 'src';
+      var v = el.getAttribute(attr);
+      if (v) el.setAttribute(attr, withCode(v));
+    }
+  };
+  fix(document);
+  if (window.MutationObserver) {
+    new MutationObserver(function () { fix(document); })
+      .observe(document.documentElement, { childList: true, subtree: true });
+  }
+  // ② fetch
+  var origFetch = window.fetch;
+  window.fetch = function (input, init) {
+    try {
+      if (typeof input === 'string') input = withCode(input);
+      else if (input && typeof input.url === 'string') {
+        input = new Request(withCode(input.url), input);
+      }
+    } catch (e) { /* 交给原 fetch 报错 */ }
+    return origFetch.call(this, input, init);
+  };
+  // ③ XHR（万一有）
+  var origOpen = XMLHttpRequest.prototype.open;
+  XMLHttpRequest.prototype.open = function (method, url) {
+    var args = arguments;
+    try {
+      if (typeof url === 'string') args[1] = withCode(url);
+    } catch (e) { /* ignore */ }
+    return origOpen.apply(this, args);
+  };
+})();
+</script>
+<link rel="stylesheet" href="style.css">
+<!-- 新手引导的样式单独成文件：它有自己的一套遮罩/卡片类名，
+     混进 style.css 会动到既有主题回归断言（CSSOM 规则数等）。 -->
+<link rel="stylesheet" href="onboarding.css">
+<!-- 引导的「目标是否就绪」判定抽成纯函数，便于脱离浏览器单测
+     （见 docs 备忘：place() 的等待 vs 跳步分支曾出过一次线上事故）。 -->
+<script src="onboarding_ready.js"></script>
+</head>
+<body>
+  <!-- ★ 油画肌理 · 湍流笔触层 ★
+       候选原型 design-explore/starry-night/index.html 用 SVG feTurbulence +
+       feDisplacementMap 做「厚涂笔触」：湍流位移让色块边缘产生油画式撕裂。
+       这是纯装饰层，固定定位、不挡交互（pointer-events:none），
+       且只在星月夜 / 向日葵两个梵高方向显示（由 CSS 控制）。 -->
+  <svg class="oil-brush" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <filter id="oilPaint" x="0" y="0" width="100%" height="100%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.012 0.03" numOctaves="4" seed="7" result="n"/>
+      <feDisplacementMap in="SourceGraphic" in2="n" scale="34" xChannelSelector="R" yChannelSelector="G"/>
+    </filter>
+    <rect width="100%" height="100%" fill="#2d5c86" filter="url(#oilPaint)"/>
+  </svg>
+
+  <header class="topbar">
+  <div class="brand">我的英文库 MyEnglishVault<span class="brand-sub">个人版 · 本机</span></div>
+  <nav class="tabs">
+    <button class="tab active" data-module="practice">翻译练习</button>
+    <button class="tab" data-module="vocab">词汇库</button>
+    <button class="tab" data-module="articles">外刊库</button>
+    <button class="tab" data-module="links">关联库</button>
+    <button class="tab" data-module="analytics">学习进度</button>
+    <!-- 需求 2：顶栏合并成一个「关联库」Tab，进Tab 后二选一（近似词关联 / 层级结构）。
+         原来这里是独立的「概念树」Tab。两套关系的**数据模型与语义都不变**
+         （关联库 = 无向同伴组；概念树 = 有向父子），合并的只是**用户视角的入口**：
+         用户不必在两个名字相近的 Tab 之间来回跳，点进来先选自己要看的那一种。
+         模式选择记在 localStorage（不落库）——多一步换来结构清楚。 -->
+  </nav>
+  <div class="status">
+    <!-- ★ 学习进度入口 ★
+         放在顶栏右上角、「设置」按钮**之前**（用户截图里五角星标的位置）。
+         视觉权重刻意压得比「设置」轻：它是查看数据的辅助入口，
+         不该抢过设置按钮的注意力。用 .topbar-btn 的透明底样式。 -->
+    <button id="stats-open" class="btn btn-sm topbar-btn" title="查看学习进度分析">学习进度</button>
+    <button id="s-open" class="btn btn-sm topbar-btn" title="AI 与练习设置">设置</button>
+    <!-- 侧栏方向（星月夜 / 克制）没有顶栏，这个平均分就落到导航栏底部；
+         顶栏方向下它是隐藏的（那些方向的顶栏右侧另有.scorebox / .right）。 -->
+    <span class="nav-score" id="nav-score" data-stat="avg" hidden></span>
+    <span id="status">连接中…</span>
+  </div>
+</header>
+
+<main class="content">
+
+  <!-- ===================================================================
+       骨架轴的侧栏容器（真实 DOM，不是伪元素）
+       -------------------------------------------------------------------
+       六个设计方向的主区列结构各不相同，侧栏的**语义也各不相同**：
+         向日葵 = 右侧花盘（真画裁切）
+         克制   = 右侧指标栏
+         蒙娜丽莎 = 左人物肖像 + 右画廊说明
+         吸血鬼日记 = 左状态栏
+         漫威   = 右数字栏 + 右近期练习
+       所以这里不是「一个通用统计栏」，而是**每个方向各挂各的结构**：
+       .rail-a / .rail-b 两个容器，各自内部按 data-rail 挂不同块，
+       由 CSS 决定哪个方向显示哪个块。同一时刻只有一个方向生效。
+       数字全部来自真实接口（/api/review/due-count、/api/practices/stats、
+       /api/stats、/api/analytics、/api/practices），不写死。
+       =================================================================== -->
+  <aside class="rail rail-a" id="rail-a" aria-label="侧栏">
+
+    <!-- 向日葵：花盘。真梵高画裁切，不是画的图标 -->
+    <section class="rv" data-rail="disc">
+      <div class="disc">
+        <div class="disc-frame">
+          <img src="assets/disc-swirl.jpg" alt="梵高《麦田与柏树》1889 麦田与灌木局部：厚涂铬黄笔触">
+          <div class="disc-ring"></div>
+          <div class="disc-cap">Wheat Field with Cypresses · 1889</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 蒙娜丽莎：左人物肖像。
+         用**真画**（梵高《摘花帽男子》The Met CC0），不是 CSS 渐变画的假人：
+         渐变堆出来的"肖像"放大看就是一枚鸡蛋色椭圆加一个半圆肩膀，
+         那种造物经不起端详。 -->
+    <figure class="rv figure" data-rail="figure">
+      <div class="frame">
+        <div class="canvas">
+          <img src="assets/portrait.jpg" alt="梵高《摘花帽男子》1887：戴草帽、留红胡的男子半身像">
+        </div>
+      </div>
+      <figcaption>Portrait of a Learner</figcaption>
+      <div class="sub">每个词都记得你的脸</div>
+    </figure>
+
+    <!-- 吸血鬼日记：左状态栏 -->
+    <section class="rv status" data-rail="status">
+      <div class="s-title">Tonight</div>
+      <div class="s-big" id="rv-due" data-stat="due">—</div>
+      <div class="s-sub">个词条在等你</div>
+      <ul class="s-list">
+        <li><span>已练</span><b><span id="rv-count" data-stat="count">—</span> 次</b></li>
+        <li><span>平均分</span><b id="rv-avg" data-stat="avg">—</b></li>
+        <li><span>最高</span><b id="rv-best" data-stat="best">—</b></li>
+        <li><span>下次复习</span><b id="rv-next">—</b></li>
+      </ul>
+      <div class="s-note">「黑暗从不曾让我害怕，<br>我只是忘了该记住哪些词。」</div>
+    </section>
+
+    <!-- 漫威：右上格 The Numbers -->
+    <section class="rv p-num" data-rail="numbers">
+      <span class="cap">The Numbers</span>
+      <div class="stat"><b id="mv-due" data-stat="due">—</b><span>词条待复习</span></div>
+      <div class="stat"><b id="mv-count" data-stat="count">—</b><span>累计练习</span></div>
+      <div class="stat"><b id="mv-avg" data-stat="avg">—</b><span>练习平均分</span></div>
+      <div class="stat"><b id="mv-entries" data-stat="entries">—</b><span>词条总量</span></div>
+    </section>
+
+    <!-- 克制：右侧指标栏 -->
+    <section class="rv side" data-rail="metrics">
+      <div class="si"><div class="v" id="vs-due" data-stat="due">—</div><div class="s">今日待复习</div></div>
+      <div class="si"><div class="v" id="vs-count" data-stat="count">—</div><div class="s">累计练习</div></div>
+      <div class="si"><div class="v" id="vs-avg" data-stat="avg">—</div><div class="s">练习平均分</div></div>
+      <div class="si"><div class="v" id="vs-best" data-stat="best">—</div><div class="s">最高单次</div></div>
+      <div class="si"><div class="v" id="vs-entries" data-stat="entries">—</div><div class="s">词条总量</div></div>
+      <div class="si"><div class="v" id="vs-days" data-stat="days">—</div><div class="s">近 30 天练习天数</div></div>
+    </section>
+  </aside>
+
+  <aside class="rail rail-b" id="rail-b" aria-label="副侧栏">
+    <!-- 蒙娜丽莎：右画廊说明 -->
+    <section class="rv plaque" data-rail="plaque">
+      <h3>Tonight's Numbers</h3>
+      <div class="item"><div class="v" id="mn-due" data-stat="due">—</div><div class="k">词条待复习</div></div>
+      <div class="item"><div class="v" id="mn-count" data-stat="count">—</div><div class="k">累计练习</div></div>
+      <div class="item"><div class="v" id="mn-avg" data-stat="avg">—</div><div class="k">练习平均分</div></div>
+      <div class="item"><div class="v" id="mn-entries" data-stat="entries">—</div><div class="k">词条总量</div></div>
+      <div class="wide">近 30 天里有 <em id="mn-days" data-stat="days">—</em> 天做了练习，其余时间在默默积累词条 —— 像一幅画要很久才干透。</div>
+    </section>
+
+    <!-- 漫威：右下格 Recent Issues -->
+    <section class="rv p-seq" data-rail="issues">
+      <span class="cap r">Recent Issues</span>
+      <ol class="issues" id="mv-issues"><li class="empty">读取中…</li></ol>
+    </section>
+  </aside>
+
+  <section class="panel active" id="panel-practice">
+    <!-- ★ 学习进度四宫格 ★
+         星月夜 / 向日葵两个方向的候选原型里，翻译页顶部是「标题 + 4 个进度方块」，
+         下面是超大翻译区、再下面是翻译记录。本应用原来没有这层结构，
+         所以补一个容器 —— 数字全部走 data-stat（railsModule 从真实接口取），
+         不写死。朴素与克制方向不显示这层（见 CSS 的作用域限定）。 -->
+    <div class="prac-stats" id="prac-stats">
+      <div class="pstat">
+        <div class="pstat-k">今日到期</div>
+        <div class="pstat-v"><span data-stat="due">—</span><i class="pstat-u">词</i></div>
+      </div>
+      <div class="pstat">
+        <div class="pstat-k">已完成</div>
+        <div class="pstat-v"><span data-stat="count">—</span><i class="pstat-u">次</i></div>
+      </div>
+      <div class="pstat">
+        <div class="pstat-k">今日平均</div>
+        <div class="pstat-v"><span data-stat="todayAvg">—</span><i class="pstat-u">分</i></div>
+      </div>
+      <div class="pstat">
+        <div class="pstat-k">累计练习</div>
+        <div class="pstat-v"><span data-stat="count">—</span><i class="pstat-u">次</i></div>
+      </div>
+    </div>
+    <div class="prac-layout">
+      <aside class="prac-side">
+        <div class="prac-side-head">今日复习</div>
+        <div class="prac-side-body">
+          <p id="pr-due-summary" class="muted">计算中…</p>
+          <button id="pr-start" class="btn btn-primary btn-block">开始复习</button>
+          <div class="prac-side-meta">
+            <label class="inline-field">每日提醒时间
+              <input id="pr-time" class="input input-sm" type="time" value="20:00">
+            </label>
+            <label class="inline-field">模式
+              <select id="pr-mode" class="input input-sm">
+                <option value="interval">间隔重复</option>
+                <option value="date_order">按添加日期</option>
+              </select>
+            </label>
+            <label class="inline-field">重要性 ≥
+              <!-- 值用空字符串表示「不限」，不能写 0 ——
+                   0 是有效下限（只挑 0 分词），与「不过滤」语义不同。
+                   读取时把空串转成 null 发给后端，别把 0 当成默认值发过去。 -->
+              <select id="pr-min-imp" class="input input-sm">
+                <option value="">不限</option>
+                <option value="1">1 分</option>
+                <option value="2">2 分</option>
+                <option value="3">3 分</option>
+                <option value="4">4 分</option>
+                <option value="5">5 分</option>
+              </select>
+            </label>
+            <label class="inline-field">实用性 ≥
+              <select id="pr-min-use" class="input input-sm">
+                <option value="">不限</option>
+                <option value="1">1 分</option>
+                <option value="2">2 分</option>
+                <option value="3">3 分</option>
+                <option value="4">4 分</option>
+                <option value="5">5 分</option>
+              </select>
+            </label>
+            <label class="inline-field">每轮词数
+              <!-- ★ 这一轮最多练几个词。默认 8（与后端 practices.MAX_TERMS 一致）。
+                   库里词不够时**按实际数量给**，并在练习页说明实际练了几个 ——
+                   不静默截断、不报错。 -->
+              <select id="pr-max-terms" class="input input-sm">
+                <option value="3">3 个</option>
+                <option value="5">5 个</option>
+                <option value="8" selected>8 个</option>
+                <option value="10">10 个</option>
+                <option value="15">15 个</option>
+                <option value="20">20 个</option>
+              </select>
+            </label>
+          </div>
+        </div>
+      </aside>
+
+      <div class="prac-main">
+        <p id="p-aitip" class="mock-note" hidden></p>
+
+        <div id="p-setup">
+          <div class="toolbar">
+            <span class="spacer"></span>
+            <span id="p-count" class="listmeta-inline"></span>
+          </div>
+          <div class="prac-empty-card">
+            <p class="empty-title">开始一次翻译练习</p>
+            <!-- ★ 「新建练习」放进翻译块内部（用户 2026-10-22 反馈）：
+                 原先它孤零零挂在画布上方的工具条里，看着像页面级按钮，
+                 而它其实是「开始这一块画布里的练习」的入口。
+                 ★ 又一轮反馈：按钮不许吊在画布正中间，要放到角落。
+                   现在绝对定位到画布右下角，标题在左上，形成对角关系。 -->
+            <div class="prac-start-row">
+              <button id="p-new" class="btn btn-primary">+ 新建练习</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="p-stage" hidden>
+          <div class="toolbar">
+            <button id="p-giveup" class="btn btn-sm">退出本轮</button>
+            <span class="spacer"></span>
+            <span id="p-stage-progress" class="listmeta-inline">-</span>
+          </div>
+
+          <p id="p-missing" class="mock-note" hidden></p>
+          <!-- ★ 「每轮词数」的实际结果说明（app.js 的 renderPractice 写它）。
+               元素必须存在 —— 缺失会让 $('p-termcount') 返回 null，
+               写属性抛 TypeError → renderPractice 中断 → 练习页白屏。 -->
+          <p id="p-termcount" class="mock-note" hidden></p>
+
+          <div class="prac-stage-card">
+            <div class="prac-stage-src">
+              <div class="prac-item-head">
+                <span class="prac-item-terms">目标词：<strong id="p-src-term"></strong></span>
+                <span id="p-src-meta" class="muted"></span>
+              </div>
+              <p class="prac-zh" id="p-zh"></p>
+            </div>
+
+            <div id="p-form">
+              <textarea id="p-input" class="input" rows="4"
+                placeholder="在这里输入你的英文翻译（Ctrl+Enter 提交）"></textarea>
+              <div class="prac-stage-actions">
+                <button id="p-submit" class="btn btn-primary">提交</button>
+              </div>
+              <p id="p-waiting" class="mock-note" hidden></p>
+            </div>
+
+            <div id="p-result" hidden>
+              <div class="prac-score-head">
+                <span>本轮得分</span>
+                <strong id="p-total">0</strong><span class="muted">/ 100</span>
+              </div>
+              <div id="p-scores" class="prac-scores"></div>
+              <p id="p-suggestion" class="prac-suggestion"></p>
+              <div id="p-result-extra"></div>
+              <div class="prac-stage-actions">
+                <button id="p-next" class="btn btn-primary">下一条</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <p id="p-trend" class="listmeta-inline"></p>
+        <div id="p-history" class="prac-history"></div>
+        <div id="p-empty" class="empty" hidden>
+          <p class="empty-title">还没有练习记录</p>
+          </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel" id="panel-vocab">
+    <div class="toolbar">
+      <input id="v-search" class="input" type="search" placeholder="搜索词条 / 释义 / 例句" autocomplete="off">
+      <select id="v-type" class="input input-sm">
+        <option value="">全部类型</option>
+        <option value="word">单词</option>
+        <option value="phrase">短语</option>
+      </select>
+      <label class="inline-field">从<input id="v-from" class="input input-sm" type="date"></label>
+      <label class="inline-field">到<input id="v-to" class="input input-sm" type="date"></label>
+      <button id="v-reset" class="btn">重置</button>
+      <span class="spacer"></span>
+      <!-- 需求 4：AI 辅助评分入口。
+           刻意**不新增表格列**做多选：列结构（colgroup / thead / renderRows 的 td
+           数量必须三者一致）正由需求 5/7 的改动调整，多插一列会让那套一致性校验
+           再次失配。多选改用「点行选中」，见 app.js 的 toggleRowSelect。 -->
+      <span id="v-selcount" class="muted" hidden></span>
+      <button id="v-ai-selected" class="btn" disabled>AI 评分（已选 0）</button>
+      <button id="v-ai-unrated" class="btn">批量评估未评分</button>
+      <button id="v-import" class="btn">导入</button>
+      <button id="v-export" class="btn">导出</button>
+      <button id="v-new" class="btn btn-primary">+ 新增条目</button>
+      <input id="v-file" type="file" accept=".json,application/json" hidden>
+    </div>
+
+    <div class="listmeta">
+      <span id="v-count">加载中…</span>
+    </div>
+
+    <div class="tablewrap">
+      <table class="grid">
+        <colgroup>
+          <col style="width:140px"><col style="width:52px"><col style="width:64px">
+          <col style="width:auto">
+          <col style="width:128px"><col style="width:128px">
+          <col style="width:118px"><col style="width:138px">
+        </colgroup>
+        <thead>
+          <!-- 例句 / 来源两列已移入词条详情页（需求 5）：这两列内容通常很长，
+               铺在主视图里会把表格撑得很高、挤掉其他列的可读宽度。
+               列数必须与 colgroup、app.js 的 renderRows 行模板严格一致（qa_test_r3 有断言）。 -->
+          <tr>
+            <th>词条</th><th>类型</th><th>词性</th><th>中文释义</th>
+            <th>重要性</th><th>实用性</th>
+            <th>添加时间</th><th>操作</th>
+          </tr>
+        </thead>
+        <tbody id="v-body"></tbody>
+      </table>
+      <div id="v-empty" class="empty" hidden>
+        <p class="empty-title">还没有条目</p>
+      </div>
+      <div id="v-loading" class="empty">加载中…</div>
+    </div>
+
+    <div class="pager">
+      <button id="v-prev" class="btn btn-sm">上一页</button>
+      <span id="v-page" class="pager-info">-</span>
+      <button id="v-next" class="btn btn-sm">下一页</button>
+    </div>
+  </section>
+
+  <section class="panel" id="panel-articles">
+    <div class="toolbar">
+      <input id="a-search" class="input" type="search" placeholder="搜索文章标题 / 中文标题 / 来源 / 正文" autocomplete="off">
+      <div class="tagselect" id="a-tagselect">
+        <button type="button" class="tagselect-head" id="a-tagselect-head"
+                aria-haspopup="listbox" aria-expanded="false">
+          <span class="tagselect-val" id="a-tagselect-val"></span>
+          <span class="tagselect-caret" aria-hidden="true"></span>
+        </button>
+        <div class="tagselect-panel" id="a-tagselect-panel" role="listbox" hidden></div>
+      </div>
+      <button id="a-reset" class="btn">重置</button>
+      <span class="spacer"></span>
+      <button id="a-new" class="btn btn-primary">+ 添加文章</button>
+    </div>
+
+    <div class="listmeta">
+      <span id="a-count">加载中…</span>
+    </div>
+
+    <div class="tablewrap">
+      <table class="grid">
+        <colgroup>
+          <col style="width:auto"><col style="width:130px"><col style="width:90px">
+          <col style="width:190px"><col style="width:auto"><col style="width:130px"><col style="width:150px">
+        </colgroup>
+        <thead>
+          <tr><th>标题</th><th>来源</th><th>句子数</th><th>标签</th><th>链接</th><th>添加时间</th><th>操作</th></tr>
+        </thead>
+        <tbody id="a-body"></tbody>
+      </table>
+      <div id="a-empty" class="empty" hidden>
+        <p class="empty-title">还没有外刊文章</p>
+      </div>
+      <div id="a-loading" class="empty">加载中…</div>
+    </div>
+
+    <div class="pager">
+      <button id="a-prev" class="btn btn-sm">上一页</button>
+      <span id="a-page" class="pager-info">-</span>
+      <button id="a-next" class="btn btn-sm">下一页</button>
+    </div>
+  </section>
+
+  <section class="panel" id="panel-links">
+    <!-- ★ 关联库 = 块列表 + 画布编辑器 ★
+         顶部：搜索栏 + 筛选键 + 右上角「增加关联」。
+         下方：正方形关联块网格，每块一眼看出是什么词汇的关联。
+         点块 = 打开画布看这个关联；点「增加关联」= 打开空白画布。
+         两者共用**同一个**画布窗口（#cv-modal），只有「是否已加载数据」之别。 -->
+    <div class="lk-bar">
+      <input id="lk-search" class="input lk-search" type="search"
+        placeholder="搜索关联：按词条名 / 概念名 / 关联名" autocomplete="off">
+      <div class="lk-filters" id="lk-filters" role="group" aria-label="关联筛选">
+        <button type="button" class="lk-filter-btn active" data-filter="all"
+                aria-pressed="true">全部</button>
+        <button type="button" class="lk-filter-btn" data-filter="synonym"
+                aria-pressed="false">近似词</button>
+        <button type="button" class="lk-filter-btn" data-filter="antonym"
+                aria-pressed="false">反义词</button>
+        <button type="button" class="lk-filter-btn" data-filter="nodes"
+                aria-pressed="false">层级</button>
+      </div>
+      <span class="spacer"></span>
+      <span id="lk-count" class="listmeta-inline"></span>
+      <!-- 「增加关联」固定在关联库右上角 -->
+      <button id="lk-add" class="btn btn-primary">增加关联</button>
+    </div>
+
+    <!-- 正方形关联块网格 -->
+    <div id="lk-blocks" class="lk-blocks"></div>
+
+    <div id="lk-empty" class="empty" hidden>
+      <p class="empty-title">还没有关联</p>
+    </div>
+    <div id="lk-loading" class="empty">加载中…</div>
+
+    <!-- 占位节点管理（删词条后树上留下的壳）。常驻一个计数 + 一键清理，
+         不给入口的话占位会越积越多。单个占位在画布节点上点「清理占位」。 -->
+    <div class="lk-side-inline">
+      <span id="lk-tombstone-count" class="listmeta-inline">加载中…</span>
+      <button id="lk-purge-all" class="btn btn-sm" disabled>清理占位</button>
+      <!-- ★ 需求①：清理「从没被挂进任何树」的孤立词条节点行 ★
+           刻意做成**用户手动触发**而不是启动时自动删：自动删会让用户
+           觉得数据莫名消失。只删没有任何边的 kind='entry' 行（幂等），
+           用户亲手建的关联（含暂时为空的）一个都不动。 -->
+      <button id="lk-purge-empty" class="btn btn-sm"
+        title="清理从未被挂进任何层级树的孤立词条节点（不影响词汇库里的词条）">清理空壳</button>
+    </div>
+  </section>
+
+  <!-- ★ 学习进度（数据分析） ★
+       入口有两个，指向同一个面板：
+         ① 顶栏右上角「学习进度」按钮（#stats-open）—— 用户截图里五角星标的位置
+         ② 顶栏 Tab 里的「学习进度」（data-module="analytics"）
+       两个入口共用一套切换逻辑（app.js 的 switchModule），
+       所以从任一处进入，面板显示状态与 Tab 高亮始终一致。
+
+       内容全部来自真实库（GET /api/analytics），**没有示例数据**。
+       四块：30 天趋势 / 热门标签 / 新词 / 新外刊。 -->
+  <section class="panel" id="panel-analytics">
+    <div class="an-toolbar">
+      <div class="an-toolbar-l">
+        <h2 class="an-title">学习进度</h2>
+        <p class="an-sub" id="an-sub">正在读取…</p>
+      </div>
+      <div class="an-toolbar-r">
+        <span class="an-updated" id="an-updated"></span>
+        <button id="an-refresh" class="btn btn-sm" title="重新读取统计数据">刷新</button>
+      </div>
+    </div>
+
+    <!-- 概览四数 -->
+    <div class="an-stats" id="an-stats"></div>
+
+    <!-- 30 天趋势 -->
+    <section class="an-card" id="an-card-trend">
+      <div class="an-card-head">
+        <h3>近 30 天趋势</h3>
+        <span class="an-card-meta">上：练习次数与当天平均分 · 下：新增词条与外刊</span>
+      </div>
+      <div class="an-chart" id="an-trend"></div>
+      <div class="an-legend" id="an-legend"></div>
+      <p class="an-note" id="an-trend-note"></p>
+    </section>
+
+    <div class="an-grid">
+      <!-- 热门标签 -->
+      <section class="an-card">
+        <div class="an-card-head">
+          <h3>热门标签</h3>
+          <span class="an-card-meta">按外刊篇数</span>
+        </div>
+        <div class="an-tags" id="an-tags"></div>
+      </section>
+
+      <!-- 新词 -->
+      <section class="an-card">
+        <div class="an-card-head">
+          <h3>新词</h3>
+          <span class="an-card-meta">最近加入</span>
+        </div>
+        <div class="an-list" id="an-entries"></div>
+      </section>
+    </div>
+
+    <!-- 新外刊 -->
+    <section class="an-card">
+      <div class="an-card-head">
+        <h3>新外刊</h3>
+        <span class="an-card-meta">最近导入</span>
+      </div>
+      <div class="an-list" id="an-articles"></div>
+    </section>
+  </section>
+</main>
+
+<footer class="footer">
+  <span id="dbpath"></span>
+  <span id="counts"></span>
+</footer>
+
+<!-- 新增 / 编辑条目 -->
+<div class="modal" id="v-modal" hidden>
+  <div class="modal-card">
+    <div class="modal-head"><span id="v-modal-title">新增条目</span></div>
+    <div class="modal-body">
+      <div class="form-row">
+        <label class="form-label">类型</label>
+        <select id="f-type" class="input">
+          <option value="word">单词</option>
+          <option value="phrase">短语</option>
+        </select>
+      </div>
+      <div class="form-row">
+        <label class="form-label">词条 <em>*</em></label>
+        <input id="f-term" class="input" type="text" placeholder="如 abundant / take advantage of" autocomplete="off">
+      </div>
+      <div class="form-row" id="f-pos-row">
+        <label class="form-label">词性</label>
+        <input id="f-pos" class="input" type="text" placeholder="如 n. / v. / adj." autocomplete="off">
+      </div>
+      <div class="form-row">
+        <label class="form-label">中文释义 <em>*</em></label>
+        <textarea id="f-meaning" class="input" rows="2" placeholder="如 丰富的；充裕的"></textarea>
+      </div>
+      <div class="form-row">
+        <label class="form-label">例句</label>
+        <textarea id="f-usage" class="input" rows="3" placeholder="英文例句，可留空"></textarea>
+      </div>
+      <div class="form-row">
+        <label class="form-label">来源</label>
+        <input id="f-source" class="input" type="text" placeholder="哪篇文章 / 出处，可留空" autocomplete="off">
+      </div>
+      <!-- 评分只在编辑态里改（需求 7）：主视图与详情页的星级一律只读。
+           两颗控件由 openForm 用 buildStars 挂进来，未评分时是空心态。 -->
+      <div class="form-row">
+        <label class="form-label">重要性</label>
+        <div id="f-importance" class="form-rating"></div>
+      </div>
+      <div class="form-row">
+        <label class="form-label">实用性</label>
+        <div id="f-usefulness" class="form-rating"></div>
+      </div>
+      <p class="muted form-hint">星级：点左半 = 半星，点右半 = 整星；未评分保持空心。
+        没有改动过的评分不会提交，原分值原样保留。</p>
+      <p id="f-error" class="form-error" hidden></p>
+    </div>
+    <div class="modal-foot">
+      <button id="f-cancel" class="btn">取消</button>
+      <button id="f-save" class="btn btn-primary">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 词条详情（只读）：例句与来源的完整内容在这里看 -->
+<!-- 需求 5：主视图不再展示例句 / 来源，完整内容一律进详情页。
+     内容全部由 openDetail 用 DOM 构建（用户自由文本走 textContent）。
+     前缀 v-detail-* 与编辑表单弹窗的 f-* 严格分开，两套字段互不复用。 -->
+<div class="modal" id="v-detail" hidden>
+  <div class="modal-card modal-lg">
+    <div class="modal-head">
+      <span id="v-detail-title">词条详情</span>
+      <span id="v-detail-meta" class="modal-head-meta"></span>
+    </div>
+    <div class="modal-body">
+      <div class="v-detail-grid">
+        <div class="v-detail-cell">
+          <span class="v-detail-label">词条</span>
+          <span id="v-detail-term" class="v-detail-term"></span>
+        </div>
+        <div class="v-detail-cell">
+          <span class="v-detail-label">类型</span>
+          <span id="v-detail-type"></span>
+        </div>
+        <div class="v-detail-cell">
+          <span class="v-detail-label">词性</span>
+          <span id="v-detail-pos"></span>
+        </div>
+        <div class="v-detail-cell">
+          <span class="v-detail-label">重要性</span>
+          <span id="v-detail-importance" class="v-detail-rating"></span>
+        </div>
+        <div class="v-detail-cell">
+          <span class="v-detail-label">实用性</span>
+          <span id="v-detail-usefulness" class="v-detail-rating"></span>
+        </div>
+      </div>
+      <div class="v-detail-block">
+        <span class="v-detail-label">中文释义</span>
+        <p id="v-detail-meaning" class="v-detail-text"></p>
+      </div>
+      <div class="v-detail-block">
+        <span class="v-detail-label">例句</span>
+        <p id="v-detail-usage" class="v-detail-text v-detail-usage"></p>
+      </div>
+      <div class="v-detail-block">
+        <span class="v-detail-label">来源</span>
+        <p id="v-detail-source" class="v-detail-text"></p>
+      </div>
+      <p class="muted form-hint">评分只读。需要调整请点「编辑」，在编辑弹窗里打分。</p>
+    </div>
+    <div class="modal-foot">
+      <button id="v-detail-edit" class="btn">编辑</button>
+      <button id="v-detail-ai" class="btn"
+        title="让 AI 重新评估这个词的建议分。已有手动评分也会重新评估，接受建议才会覆盖">重新评估</button>
+      <button id="v-detail-close" class="btn btn-primary">关闭</button>
+    </div>
+  </div>
+</div>
+
+<!-- AI 评分建议确认面板（需求 4）
+     关键设计：**AI 的建议一律先进这个确认队列，绝不自动写库**。
+     逐条给出「接受 / 修改后接受 / 忽略」三个动作，写不写、怎么写全由用户点。
+     理由文本来自模型输出（不可信外部文本），一律 textContent 写入，
+     禁用 innerHTML 拼接 —— 理由里出现 <img src=x onerror=...> 时不能变成真元素。 -->
+<div class="modal" id="ai-modal" hidden>
+  <div class="modal-card modal-lg">
+    <div class="modal-head">
+      <span id="ai-modal-title">AI 评分建议</span>
+      <span id="ai-modal-meta" class="modal-head-meta"></span>
+    </div>
+    <div class="modal-body">
+      <!-- 批量进度条：分批调用期间显示，可中断 -->
+      <div id="ai-progress-wrap" class="ai-progress-wrap" hidden>
+        <div class="ai-progress"><div id="ai-progress-bar" class="ai-progress-bar"></div></div>
+        <span id="ai-progress-text" class="muted"></span>
+      </div>
+      <p class="muted form-hint" id="ai-hint-batch">
+        AI 只给<b>建议</b>，不会自动保存。批量评估会<b>跳过</b>已有手动评分的词条；
+        逐条选择「接受」或「修改后接受」才会写入。
+      </p>
+      <p class="muted form-hint" id="ai-hint-single" hidden>
+        这是<b>重新评估</b>：已有手动评分的词条也会重新给出建议。AI 仍然只给<b>建议</b>、不会自动保存，
+        接受后会<b>覆盖</b>该词条原来的手动评分——不点「接受」就维持原样。
+      </p>
+      <div id="ai-list"></div>
+      <p id="ai-error" class="form-error" hidden></p>
+    </div>
+    <div class="modal-foot">
+      <button id="ai-interrupt" class="btn btn-danger" hidden>中断</button>
+      <button id="ai-accept-all" class="btn">全部接受</button>
+      <button id="ai-close" class="btn btn-primary">完成</button>
+    </div>
+  </div>
+</div>
+
+<!-- 添加 / 编辑外刊文章 -->
+<div class="modal" id="a-modal" hidden>
+  <div class="modal-card modal-lg">
+    <div class="modal-head"><span id="a-modal-title">添加外刊文章</span></div>
+    <div class="modal-body">
+      <div class="form-row">
+        <label class="form-label">标题 <em>*</em></label>
+        <input id="a-f-title" class="input" type="text" placeholder="如 The economics of attention" autocomplete="off">
+      </div>
+      <div class="form-row">
+        <label class="form-label">中文标题</label>
+        <input id="a-f-title-zh" class="input" type="text" placeholder="选填，如「注意力经济学」。列表与详情会一并显示，搜索时也能搜到。" autocomplete="off">
+      </div>
+      <div class="form-row form-row-2">
+        <div>
+          <label class="form-label">来源刊物</label>
+          <input id="a-f-source" class="input" type="text" placeholder="如 The Guardian" autocomplete="off">
+        </div>
+        <div>
+          <label class="form-label">原文链接</label>
+          <input id="a-f-url" class="input" type="url" placeholder="https://…（选填）" autocomplete="off">
+        </div>
+      </div>
+      <div class="form-row">
+        <label class="form-label">标签</label>
+        <input id="a-f-topic" class="input" type="text" list="a-topic-options"
+          placeholder="选填，多个标签用逗号分隔（最多 5 个、每个不超过 20 字），如 经济, 心理；新标签保存后自动记住，可复用" autocomplete="off">
+        <datalist id="a-topic-options">
+          <option value="经济"></option>
+          <option value="科学"></option>
+          <option value="科技"></option>
+          <option value="心理"></option>
+          <option value="人物"></option>
+          <option value="文化"></option>
+          <option value="游戏"></option>
+          <option value="其他"></option>
+        </datalist>
+      </div>
+      <div class="form-row">
+        <label class="form-label">正文 <em>*</em></label>
+        <textarea id="a-f-content" class="input" rows="12"
+          placeholder="粘贴外刊英文原文，保存时会自动按句切分，供翻译练习按词检索选句。"></textarea>
+      </div>
+      <div class="form-row">
+        <label class="form-label">中文翻译</label>
+        <textarea id="a-f-zh" class="input" rows="6"
+          placeholder="选填：粘贴对应的中文译文。中英文句数一致时，翻译练习直接用你的译文作参考；不一致则只保存在文章详情里对照查看。"></textarea>
+      </div>
+      <div class="form-row">
+        <label class="form-label">其他信息</label>
+        <textarea id="a-f-extra" class="input" rows="4"
+          placeholder="选填：作者信息、文章背景、出处说明等备注文字（不超过 5000 字）。保存后可在文章详情里查看。"></textarea>
+      </div>
+      <p class="muted form-hint">提示：只有粘贴到这里的内容会进入外刊库。翻译练习的例句都来自外刊库；库里检索不到的词，可以把相关原文粘贴到这里，下次就会被覆盖。</p>
+      <p id="a-f-error" class="form-error" hidden></p>
+    </div>
+    <div class="modal-foot">
+      <button id="a-f-cancel" class="btn">取消</button>
+      <button id="a-f-save" class="btn btn-primary">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 文章详情 / 句子列表 -->
+<div class="modal" id="a-detail" hidden>
+  <div class="modal-card modal-lg">
+    <div class="modal-head"><span id="a-detail-title">文章句子</span></div>
+    <div class="modal-body">
+      <!-- 中文标题（需求④）：有才显示，为空时整块隐藏，不占位也不显示「null」 -->
+      <div id="a-detail-title-zh-wrap" class="article-title-zh" hidden>
+        <span class="article-title-zh-label">中文标题</span>
+        <span id="a-detail-title-zh"></span>
+      </div>
+      <div id="a-detail-extra" class="article-extra" hidden>
+        <p class="article-extra-title">其他信息</p>
+        <p id="a-detail-extra-text"></p>
+      </div>
+      <ol id="a-detail-list" class="sentlist"></ol>
+      <div id="a-detail-zh" class="article-zh" hidden>
+        <p class="article-zh-title">整篇中文译文（部分句子未能逐句对上，此处补全对照）：</p>
+        <p id="a-detail-zh-text"></p>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button id="a-detail-close" class="btn">关闭</button>
+    </div>
+  </div>
+</div>
+
+<!-- AI 设置（OpenAI 兼容接口） -->
+<div class="modal" id="s-modal" hidden>
+  <div class="modal-card">
+    <div class="modal-head"><span>设置</span></div>
+    <div class="modal-body">
+      <!-- 界面主题：7 个方向，同一套结构只换语义变量。色板值由 app.js 的
+           THEMES 元数据注入（textContent / style.background），不拼 innerHTML。 -->
+      <fieldset class="theme-field">
+        <legend class="form-label">界面主题</legend>
+        <div class="theme-grid" id="s-theme-grid" role="radiogroup" aria-label="界面主题"></div>
+        <p class="muted form-hint">全部页面共用一套结构，切换只改语义变量，立即生效并记住选择。</p>
+      </fieldset>
+      <p class="settings-sep" aria-hidden="true"></p>
+      <p class="form-label settings-subhead">AI 点评接口</p>
+      <p id="s-ai-status" class="mock-note" hidden></p>
+      <div class="form-row">
+        <label class="form-label">接口地址</label>
+        <input id="s-base-url" class="input" type="text" placeholder="如 https://api.deepseek.com/v1（火山方舟填 https://ark.cn-beijing.volces.com/api/v3）" autocomplete="off">
+      </div>
+      <div class="form-row">
+        <label class="form-label">模型</label>
+        <input id="s-model" class="input" type="text" placeholder="如 deepseek-chat（火山方舟填 doubao-seed-2-1-pro-260915）" autocomplete="off">
+      </div>
+      <div class="form-row">
+        <label class="form-label">密钥</label>
+        <input id="s-key" class="input" type="password" placeholder="已保存的密钥不会回显；不修改请留空" autocomplete="off">
+      </div>
+      <div class="form-row">
+        <label class="form-label">超时（秒）</label>
+        <input id="s-timeout" class="input" type="number" min="5" max="300" step="1">
+      </div>
+      <p class="muted form-hint" id="s-hint-desktop">翻译与点评走 OpenAI 兼容的 Chat Completions 接口；未配置密钥时软件以演示模式运行（占位译文与评分）。密钥只保存在本机设置文件中，也可用环境变量 OPENAI_API_KEY 提供（优先级更高）。</p>
+      <p class="muted form-hint">填参示例：DeepSeek → 地址 <code>https://api.deepseek.com/v1</code>、模型 <code>deepseek-chat</code>；火山方舟 → 地址 <code>https://ark.cn-beijing.volces.com/api/v3</code>、模型 <code>doubao-seed-2-1-pro-260915</code>（旧名 doubao-pro-32k 等已下线，别用）。</p>
+
+      <!-- 云端专属说明（桌面模式整段隐藏）。接口地址与模型现在**由访客自己填**，
+           但请求是**服务器代访客发出的** —— 这两件事必须对访客说清楚，
+           否则他会以为"填了没生效"，或者不知道自己的地址被用在了哪里。 -->
+      <div id="s-cloud-only" hidden>
+        <p class="settings-sep" aria-hidden="true"></p>
+        <p class="form-label settings-subhead">关于接口地址与隐私</p>
+        <p class="muted form-hint">这是云端演示版：<strong>接口地址与模型由你自己填</strong>（填你手上的火山方舟 / DeepSeek 等服务即可），<strong>密钥只保存在你当前这个浏览器</strong>（localStorage）。地址、模型、密钥三者都随请求头带给服务器，<strong>不会写入服务端磁盘</strong>；清除浏览器数据或点击下方「清空我的数据」即彻底清除。</p>
+        <p class="muted form-hint">请注意：请求是<strong>由服务器代你发出的</strong>，所以接口地址必须是<strong>公网可访问的 https 地址</strong>（以 <code>https://</code> 开头、443 端口）；指向内网或云元数据地址会被直接拒绝并给出提示。接口地址与模型建议成对填写（只填地址会用平台默认模型去调你那边的服务，多数会报"模型不存在"）。</p>
+      </div>
+
+      <!-- 「清空我的数据」：仅云端显示。桌面库是本机用户自己的积累，
+           没有"访客数据"的概念，放一个删库按钮在那里是危险品。 -->
+      <div id="s-clear-wrap" hidden>
+        <p class="settings-sep" aria-hidden="true"></p>
+        <p class="form-label settings-subhead">我的数据</p>
+        <p class="muted form-hint">你的词汇库、外刊库与练习记录都保存在服务器上，按本浏览器独立隔离，<strong>不含任何个人信息</strong>。你可以随时一键全部删除。</p>
+        <button id="s-clear" class="btn btn-danger" type="button">清空我的数据</button>
+        <div id="s-clear-confirm" class="form-confirm" hidden>
+          <p class="form-error">将删除你的全部数据，且不可恢复。删除后此处将保持为空库（不会重新载入演示语料），你可以自己添加词条和文章。确认删除？</p>
+          <button id="s-clear-do" class="btn btn-danger" type="button">确认删除</button>
+          <button id="s-clear-no" class="btn" type="button">取消</button>
+        </div>
+      </div>
+      <p id="s-error" class="form-error" hidden></p>
+    </div>
+    <div class="modal-foot">
+      <!-- 「重新查看新手引导」放在**固定的底部操作区**，不放进 .modal-body。
+           ★ 原因（实测踩到）★：.modal-body 是可滚动的（实测 scrollHeight 955 >
+             clientHeight 728），放进去按钮落在 top≈988px 而视口只有 900px ——
+             「随时可以重看」的东西藏在滚动线以下，等于半残。
+           ★ 桌面与网页都显示 ★（引导本身与形态无关，也不碰 sharecode）。 -->
+      <button id="s-replay-onboarding" class="btn" type="button">重新查看新手引导</button>
+      <button id="s-cancel" class="btn">取消</button>
+      <button id="s-save" class="btn btn-primary">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 复习卡片（翻译练习内的「今日复习」子功能：先回忆 → 显示答案 → 自评记住/没记住） -->
+<div class="modal" id="rv-modal" hidden>
+  <div class="modal-card modal-sm">
+    <div class="modal-head">
+      <span>今日复习</span>
+      <span id="rv-progress" class="modal-head-meta"></span>
+    </div>
+    <div class="modal-body">
+      <div class="rv-card">
+        <div class="rv-term-row">
+          <strong id="rv-term" class="rv-term"></strong>
+          <span id="rv-pos" class="muted"></span>
+        </div>
+        <p class="rv-hint muted">先在心里回忆它的中文释义与用法，再点「显示答案」自评。</p>
+        <div id="rv-answer" class="rv-answer" hidden></div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button id="rv-reveal" class="btn btn-primary">显示答案</button>
+      <span id="rv-actions" class="rv-actions" hidden>
+        <button id="rv-forgot" class="btn">没记住</button>
+        <button id="rv-remember" class="btn btn-primary">记住了</button>
+      </span>
+      <span class="spacer"></span>
+      <button id="rv-close" class="btn">关闭</button>
+    </div>
+  </div>
+</div>
+
+<!-- 练习记录详情（只读）：点历史记录里的任意一条打开
+     展示：原句英文 / 参考中文译文 / 当时的翻译答案 / AI 三维评分与逐条 issues / 更优表达建议。
+     ★ 内容全部来自用户输入与模型输出（ai_feedback 是模型原话），一律由 app.js 用
+     DOM + textContent 构建，**禁止 innerHTML 拼接** —— 理由里出现
+     <img src=x onerror=...> 时不能变成真元素。 -->
+<div class="modal" id="p-detail" hidden>
+  <div class="modal-card modal-lg">
+    <div class="modal-head">
+      <span id="p-detail-title">练习详情</span>
+      <span id="p-detail-meta" class="modal-head-meta"></span>
+    </div>
+    <div class="modal-body">
+      <div class="pd-block">
+        <span class="pd-label">原句英文</span>
+        <p id="p-detail-en" class="pd-text pd-en"></p>
+      </div>
+      <div class="pd-block">
+        <span class="pd-label">参考中文译文</span>
+        <p id="p-detail-zh" class="pd-text"></p>
+      </div>
+      <div class="pd-block">
+        <span class="pd-label">我当时的翻译</span>
+        <p id="p-detail-user" class="pd-text pd-en"></p>
+      </div>
+      <div class="pd-block">
+        <span class="pd-label">AI 三维评分</span>
+        <div id="p-detail-scores" class="pd-scores"></div>
+      </div>
+      <div class="pd-block">
+        <span class="pd-label">更优表达建议</span>
+        <p id="p-detail-suggestion" class="pd-text pd-suggestion"></p>
+      </div>
+
+      <!-- 修正评分留痕：采纳过的修正会留在这里，可追溯「这个分为什么被改过」 -->
+      <div class="pd-block" id="p-detail-revisions-block" hidden>
+        <span class="pd-label">评分修正记录</span>
+        <div id="p-detail-revisions" class="pd-revisions"></div>
+      </div>
+
+      <!-- 和 AI 讨论本题 ★ 用户输入 + 模型原话，一律由 app.js 用 DOM +
+           textContent 构建，绝不 innerHTML 拼接：提问与 reply 都是不可信文本。 -->
+      <div class="pd-block pd-discuss">
+        <span class="pd-label">和 AI 讨论本题</span>
+        <p class="pd-hint">对某一处扣分有疑问就问它，例如「这个 just 到底扣不扣分」
+          「冠词真的算错吗」。讨论只是给建议，<strong>不点采纳就不会改动原有评分</strong>。</p>
+        <textarea id="pd-question" class="input" rows="3"
+          placeholder="写下你的质疑或追问…"></textarea>
+        <div class="pd-discuss-actions">
+          <button id="pd-discuss-send" class="btn btn-primary">让 AI 回答</button>
+          <span id="pd-discuss-status" class="listmeta-inline"></span>
+        </div>
+
+        <div id="pd-discuss-result" class="pd-discuss-result" hidden>
+          <span class="pd-label">AI 的回答</span>
+          <p id="pd-reply" class="pd-text pd-reply"></p>
+
+          <!-- 仅当 AI 判定首评有偏差时才出现；revised=false 时整块隐藏 -->
+          <div id="pd-revised" class="pd-revised" hidden>
+            <span class="pd-label">建议的修正评分</span>
+            <div id="pd-revised-scores" class="pd-scores"></div>
+            <p class="pd-hint">点「采纳修正评分」后，这三个分数与总分才会写回这条练习记录。</p>
+            <button id="pd-adopt" class="btn btn-primary">采纳修正评分</button>
+            <span id="pd-adopt-status" class="listmeta-inline"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button id="p-detail-close" class="btn btn-primary">关闭</button>
+    </div>
+  </div>
+</div>
+
+<!-- 通用删除确认（外刊库等模块复用；词汇条目用自己的 d-modal） -->
+<div class="modal" id="g-modal" hidden>
+  <div class="modal-card modal-sm">
+    <div class="modal-head"><span>删除确认</span></div>
+    <div class="modal-body">
+      <p id="g-text"></p>
+    </div>
+    <div class="modal-foot">
+      <button id="g-cancel" class="btn">取消</button>
+      <button id="g-ok" class="btn btn-danger">删除</button>
+    </div>
+  </div>
+</div>
+
+<!-- 删除确认 -->
+<div class="modal" id="d-modal" hidden>
+  <div class="modal-card modal-sm">
+    <div class="modal-head"><span>删除确认</span></div>
+    <div class="modal-body">
+      <p id="d-text">确定要删除这条条目吗？删除后其标签关联与复习状态会一并清除，且无法恢复。</p>
+    </div>
+    <div class="modal-foot">
+      <button id="d-cancel" class="btn">取消</button>
+      <button id="d-ok" class="btn btn-danger">删除</button>
+    </div>
+  </div>
+</div>
+
+<!-- ★ 关联画布弹窗：点关联块与点「增加关联」共用这一个窗口 ★
+     区别只有一个：点块时 canvasLoaded=true（节点和线都已连好），
+     点「增加关联」时是空白画布。刻意不做「只读详情 + 编辑」两套窗口。 -->
+<div class="cv-modal" id="cv-modal" hidden>
+  <div class="cv-card">
+    <div class="cv-head">
+      <span id="cv-title">关联画布</span>
+      <span id="cv-meta" class="listmeta-inline"></span>
+      <span class="spacer"></span>
+      <button id="cv-zoom-out" class="btn btn-sm" title="缩小">−</button>
+      <span id="cv-zoom" class="pager-info">100%</span>
+      <button id="cv-zoom-in" class="btn btn-sm" title="放大">＋</button>
+      <button id="cv-zoom-reset" class="btn btn-sm">复位</button>
+      <span class="listmeta-inline">缩放</span>
+      <button id="cv-close" class="btn btn-sm">关闭</button>
+    </div>
+
+    <div class="cv-body">
+      <div class="cv-main">
+        <!-- 关联块的维护操作（备注 / 删除该关联块）。
+             两种块都显示这条：关联组（SYM/OPP）走 DELETE /api/links/{id}，
+             层级块走 DELETE /api/nodes/{id}（见 app.js 的 dissolveGroup）。
+             ★ 早先这里对层级块整条 hidden = true，导致①里那些绿色「层级」
+             伪块打开后**连删除按钮都没有** —— 那才是「点了没反应」的根因。
+             「移出成员」不在这里：它挂在每个成员节点自己的 × 上，
+             这样用户「把谁移出去」不用先在列表里找是哪一条。 -->
+        <div id="cv-group-bar" class="cv-group-bar" hidden>
+          <span id="cv-note-row" class="cv-note-row">
+            <label class="form-label" for="cv-note">备注</label>
+            <input id="cv-note" class="input input-sm" type="text"
+              placeholder="选填，如「都表示充足的」" autocomplete="off">
+            <button id="cv-save-note" class="btn btn-sm">存备注</button>
+          </span>
+          <span class="spacer"></span>
+          <button id="cv-dissolve" class="btn btn-sm btn-danger">删除该关联块</button>
+        </div>
+
+      <!-- 左 + 中：画布区。SVG 只画连线与线上标记，节点是绝对定位的 HTML
+           （与放射图 #nd-svg / #nd-nodes 同一套做法：节点里有星级控件、
+           title 提示、CSS 省略号，用 HTML 写比 SVG text 省事得多）。 -->
+      <div id="cv-stage" class="cv-stage">
+        <div id="cv-canvas" class="cv-canvas">
+          <svg id="cv-svg" class="cv-svg" xmlns="http://www.w3.org/2000/svg"></svg>
+          <div id="cv-nodes" class="cv-nodes"></div>
+        </div>
+        <div id="cv-empty" class="empty">
+          <p class="empty-title">把右边的词条拖进来</p>
+          <p class="muted">按住词条拖到画布上松手即可加一个节点；点节点上的 ＋ 选关系，再把线拉到另一个节点上。</p>
+        </div>
+      </div>
+      </div><!-- /.cv-main -->
+
+      <!-- 右：搜索栏 + 筛选 + 词条库（拖拽源） -->
+      <aside class="cv-side">
+        <p class="cv-side-title">词条库</p>
+        <input id="cv-palette-search" class="input input-sm" type="search"
+          placeholder="搜索词条，拖进画布" autocomplete="off">
+        <div id="cv-palette-filters" class="cv-palette-filters" role="group" aria-label="词条筛选">
+          <button type="button" class="cv-pf-btn active" data-pfilter="all"
+                  aria-pressed="true">全部</button>
+          <button type="button" class="cv-pf-btn" data-pfilter="important"
+                  aria-pressed="false">重要</button>
+          <button type="button" class="cv-pf-btn" data-pfilter="unused"
+                  aria-pressed="false">未关联</button>
+        </div>
+        <div id="cv-palette" class="cv-palette"></div>
+        <!-- ★ 临时词条（概念节点）入口 ★
+             设计约束：「无法创造临时词条（比如 dog 作为父词条但不进入词汇库，
+             因为这个词太简单了）」。后端早就有 POST /api/nodes/concept 这个能力
+             （概念节点不进 entries 表、不参与评分、没有详情页），以前只是
+             前端没把入口露出来。这里给它一个名字输入框 + 按钮。 -->
+        <div class="cv-concept-add">
+          <label class="cv-concept-label" for="cv-concept-label">临时词条</label>
+          <div class="cv-concept-row">
+            <input id="cv-concept-label" class="input input-sm" type="text"
+              placeholder="如 dog，不进词汇库" autocomplete="off">
+            <button id="cv-concept-add" class="btn btn-sm" type="button">加入</button>
+          </div>
+          <p class="cv-concept-hint">只作父节点用，不进词汇库、不评分</p>
+        </div>
+        <p id="cv-path" class="cv-path"></p>
+        <p id="cv-error" class="form-error" hidden></p>
+        <p id="cv-hint" class="listmeta-inline"></p>
+      </aside>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast" hidden></div>
+
+<script src="app.js"></script>
+<!-- 新手引导：零第三方依赖，纯 DOM + localStorage，不碰 sharecode 逻辑。 -->
+<script src="onboarding.js"></script>
+<script>
+  // 「重新查看新手引导」按钮接线。等 DOM 就绪再绑，避免抢在 app.js 前面。
+  (function () {
+    function bind() {
+      var btn = document.getElementById('s-replay-onboarding');
+      var ob = window.EnPracticeOnboarding;
+      if (!btn || !ob || btn.dataset.bound === '1') return;
+      btn.dataset.bound = '1';
+      btn.addEventListener('click', function () { ob.replay(); });
+    }
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', bind);
+    } else { bind(); }
+  })();
+</script>
+</body>
+</html>

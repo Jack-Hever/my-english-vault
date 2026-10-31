@@ -1,0 +1,184 @@
+/* ★ 新手引导（onboarding）专用样式 ★
+ *
+ * 刻意独立成文件，不混进 style.css：
+ *   style.css 有 822 条规则、有桌面零回归断言（CSSOM 规则数等），
+ *   往里加东西会动到那些既有判据。新文件由 index.html 显式引入。
+ *
+ * 配色一律走 style.css 已有的语义令牌（var(--panel)/var(--text)/var(--accent)…），
+ * 所以 7 套主题切换时引导窗自动跟随，不会出现"引导窗跟产品割裂"。
+ */
+
+/* ── 遮罩 ──────────────────────────────────────────────────
+ * 用 box-shadow: 0 0 0 9999px 而不是给 body 加半透明底色：
+ * 这样高亮元素周围是「亮」的、其余区域是「暗」的，且不需要复制 body 的
+ * 背景纹理（body 上有油画/噪点等分层背景，一旦被半透明色盖住就会变纯色，
+ * 这是本项目以前踩过的坑，见工作日志第 5 节）。 */
+.enp-ob-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483000;
+  pointer-events: none;           /* 只有 popover 自身可点，遮罩不挡用户点别的 */
+  border-radius: 12px;
+  box-shadow: 0 0 0 9999px rgba(20, 22, 18, 0.52);
+  transition: box-shadow .28s cubic-bezier(.22, .61, .36, 1),
+              width .28s cubic-bezier(.22, .61, .36, 1),
+              height .28s cubic-bezier(.22, .61, .36, 1),
+              transform .28s cubic-bezier(.22, .61, .36, 1);
+  will-change: width, height, transform;
+}
+
+/* 高亮环：贴在目标元素外沿，视觉上把目标和遮罩分开。
+ * ★ box-sizing: border-box ★
+ *   让 JS 里设定的 width/height 等于**外沿**尺寸，border 画在盒子内部。
+ *   不加的话 border 向外扩展 2px，getBoundingClientRect() 比对时整环外扩，
+ *   高亮框贴不住按钮（实测纵向恒差 4.1px = 2×2）。 */
+.enp-ob-ring {
+  position: fixed;
+  z-index: 2147483001;
+  pointer-events: none;
+  box-sizing: border-box;
+  border: 2px solid var(--accent);
+  border-radius: 10px;
+  box-shadow: 0 0 0 3px var(--accent-ring), var(--shadow-md);
+  transition: left .28s cubic-bezier(.22, .61, .36, 1),
+              top .28s cubic-bezier(.22, .61, .36, 1),
+              width .28s cubic-bezier(.22, .61, .36, 1),
+              height .28s cubic-bezier(.22, .61, .36, 1);
+  will-change: left, top, width, height;
+}
+
+/* ── popover 卡片 ── */
+.enp-ob-pop {
+  position: fixed;
+  z-index: 2147483002;
+  width: 296px;
+  max-width: calc(100vw - 32px);
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-lg);
+  padding: 16px 18px 14px;
+  transition: top .28s cubic-bezier(.22, .61, .36, 1),
+              left .28s cubic-bezier(.22, .61, .36, 1);
+}
+
+/* 小箭头：用 CSS 三角形，不用图片、不引第三方库 */
+.enp-ob-arrow {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  transform: rotate(45deg);
+}
+.enp-ob-pop[data-side="bottom"] .enp-ob-arrow { top: -7px; }
+.enp-ob-pop[data-side="top"]    .enp-ob-arrow { bottom: -7px; }
+.enp-ob-pop[data-side="right"]  .enp-ob-arrow { left: -7px; }
+.enp-ob-pop[data-side="left"]   .enp-ob-arrow { right: -7px; }
+.enp-ob-pop[data-side="bottom"] .enp-ob-arrow { border-right: 0; border-bottom: 0; }
+.enp-ob-pop[data-side="top"]    .enp-ob-arrow { border-left: 0; border-top: 0; }
+.enp-ob-pop[data-side="right"]  .enp-ob-arrow { border-right: 0; border-top: 0; }
+.enp-ob-pop[data-side="left"]   .enp-ob-arrow { border-bottom: 0; border-left: 0; }
+
+/* 头部：步骤序号 + 标题 + 跳过 */
+.enp-ob-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.enp-ob-step {
+  flex: 0 0 auto;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-on, #fff);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 22px;
+  text-align: center;
+}
+.enp-ob-title {
+  flex: 1 1 auto;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.5;
+  color: var(--text);
+}
+.enp-ob-skip {
+  flex: 0 0 auto;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  padding: 3px 4px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.enp-ob-skip:hover { color: var(--text); background: var(--panel-soft); }
+
+/* 正文 */
+.enp-ob-text {
+  margin: 0 0 14px;
+  font-size: 13.5px;
+  line-height: 1.72;
+  color: var(--text-soft);
+}
+
+/* 底部：进度点 + 按钮 */
+.enp-ob-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.enp-ob-dots {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+}
+.enp-ob-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--border-strong);
+  transition: background .2s, width .2s;
+}
+.enp-ob-dot.on { width: 16px; background: var(--accent); }
+
+.enp-ob-acts { display: flex; gap: 8px; }
+.enp-ob-btn {
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+  font-size: 13px;
+  padding: 6px 14px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.enp-ob-btn:hover { background: var(--panel-soft); }
+.enp-ob-btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-on, #fff);
+}
+.enp-ob-btn.primary:hover { background: var(--accent-deep); border-color: var(--accent-deep); }
+
+/* ── 设置底部的「重新查看新手引导」按钮 ──
+ * 放在 .modal-foot（左）而非 .modal-body：后者可滚动，按钮会落到折叠线以下。
+ * .modal-foot 默认把按钮右对齐，这里把「重新查看」推到左边，视觉分组更清楚。 */
+#s-replay-onboarding { margin-right: auto; }
+
+/* ── 窄窗塌陷：popover 别顶出可视区 ── */
+@media (max-width: 560px) {
+  .enp-ob-pop { width: calc(100vw - 24px); left: 12px !important; }
+  .enp-ob-arrow { display: none; }
+}
+
+/* 尊重「减少动态效果」的系统偏好 */
+@media (prefers-reduced-motion: reduce) {
+  .enp-ob-mask, .enp-ob-ring, .enp-ob-pop { transition: none !important; }
+}

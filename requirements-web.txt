@@ -1,0 +1,29 @@
+fastapi==0.141.1
+starlette==1.6.0
+uvicorn==0.53.0
+pydantic==2.13.5
+requests==2.34.2
+# ★ 云端**不装** pywebview（Linux 装不上，还要 GTK）与 apscheduler
+#   （全仓库零 import，本就是死依赖）。两者只保留在 requirements.txt 供桌面版用。
+#
+# ★★ 为什么把前五个**钉死** ★★
+# 2026-10-24 公网连续踩了两次「本地全绿、公网报错」，两次都是**依赖版本差异**：
+#   ① 沙箱装 uvicorn 最新版 → 它会在 scope 里放 "http.response.pathsend" 扩展
+#      → starlette 的 FileResponse 据此绕过 http.response.body 直接发文件
+#      → ShareCodeMiddleware 收不到 body ⇒ 永远改写不了 ⇒ 公网 HTML 里
+#        资源引用全是裸名 ⇒ 网关 403 ⇒ 白屏。
+#      （本地 uvicorn 0.53 不放这个扩展，所以本地测不出来。）
+#   ② 沙箱的 uvicorn 在「先发 body、后发 start」时直接报错，而本地 0.53 容忍
+#      → 中间件「扣住 start、等 body 收齐再补发」的写法在公网炸掉。
+# ⇒ 这里把「本地已验证过的那一套」钉死，沙箱行为就等于本地行为。
+#    以后升级依赖时，先在本地跑 run_regression.py 全绿再改这里。
+#
+# ★★ requests 为什么也钉（B12 加固）★★
+# 它不再是"随便一个 HTTP 客户端"：SSRF 钉住路径（app/egress.py 的
+# `_urllib3_supports_pinning`）依赖 requests 2.32+ 自带的 urllib3 2.x
+# （`server_hostname` / `assert_hostname` 连接参数）。大版本差异会让
+# 钉住能力静默消失 ⇒ 退化成"按域名请求" ⇒ DNS rebinding 防线失效。
+# 2.34.2 是本地全量回归验证过的版本（含 urllib3 2.8.0）。
+#
+# ★ 注意 ★ 本文件会被 tools/build_deploy.py 复制覆盖 deploy/ 里的同名文件，
+#   所以依赖**只能**在这里改，直接改 deploy/ 那份会被冲掉。
