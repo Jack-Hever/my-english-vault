@@ -28,6 +28,7 @@ from . import (
     cloud,
     db,
     entries,
+    exporters,
     links,
     nodes,
     practices,
@@ -435,7 +436,7 @@ def delete_my_data() -> dict:
     """访客一键清空自己的全部数据（**仅云端**）。
 
     ★ 为什么要有这个 ★
-    大赛要求「不含个人信息」。让访客能自己删，比我们承诺"14 天后自动清理"
+    「不含个人信息」是硬要求。让访客能自己删，比我们承诺"14 天后自动清理"
     强得多：承诺要靠信任，自删不需要。
 
     ★ 桌面模式 405 ★
@@ -591,6 +592,27 @@ def export_entries(
         content=body,
         media_type="application/json; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.get("/api/entries/export.md")
+def export_entries_markdown() -> Response:
+    """导出整个词汇库为 Markdown 文件下载（不受列表筛选条件影响）。
+
+    与 /api/entries/export（JSON 备份）同源：都走 entries.export_entries，
+    这里不传任何筛选参数 ⇒ 拿到的就是全量词条。
+    """
+    conn = db.connect()
+    try:
+        payload = entries.export_entries(conn)
+    finally:
+        conn.close()
+    body = exporters.entries_markdown(payload)
+    filename = f"enpractice-entries-{payload['exported_at'][:10]}.md"
+    return Response(
+        content=body,
+        media_type="text/markdown; charset=utf-8",
+        headers={"Content-Disposition": exporters.content_disposition(filename)},
     )
 
 
@@ -962,6 +984,31 @@ def list_article_sentences_api(article_id: int) -> list[dict]:
         return articles.list_sentences(conn, article_id)
     finally:
         conn.close()
+
+
+@app.get("/api/articles/{article_id}/export.docx")
+def export_article_docx(article_id: int) -> Response:
+    """把一篇文章导出为 Word 文件下载。
+
+    内容与外刊详情弹窗保持一致：标题 / 中文标题 / 其他信息 + 逐句中英对照
+    + （存在未逐句对齐的句子时的）整篇译文。
+    """
+    conn = db.connect()
+    try:
+        art = articles.get_article(conn, article_id)
+        sentences = articles.list_sentences(conn, article_id)
+    finally:
+        conn.close()
+    try:
+        data = exporters.article_docx(art, sentences)
+    except exporters.ExportError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    filename = exporters.safe_filename(art.get("title") or "") + ".docx"
+    return Response(
+        content=data,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": exporters.content_disposition(filename)},
+    )
 
 
 @app.put("/api/articles/{article_id}")

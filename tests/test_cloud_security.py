@@ -1,4 +1,4 @@
-"""云端安全与评审体验回归测试（S4）。
+"""云端安全与用户体验回归测试（S4）。
 
 运行：python test_cloud_security.py
 （脚本式，与本仓库其它 test_*.py 一致；不用 pytest）
@@ -644,7 +644,7 @@ print("\n[9] 零改动 ratchet + 启动横幅")
 
 # ★ 这两个文件本轮明令「出网点一个字不改」。把**代码指纹**钉进测试里，
 #   就把口头约定变成了可自动执行的闸门 —— 将来谁要改，
-#   必须先更新这里并在评审里说明理由。
+#   必须先更新这里并写清理由。
 #
 # ★ 为什么比对「剥离注释后的代码」而不是逐字节 md5（2026-10-24 修正）：
 #   逐字节 md5 把**注释**和**代码**混为一谈。它真正想守的是「出网点没被改」，
@@ -728,7 +728,7 @@ print("\n[11] 措辞不许串台：桌面版不能出现「云端」两个字")
 #   桌面下用户用 ENPRACTICE_WEB_SEARCH=0 关掉联网搜索时，
 #   #p-missing 那句话原本复用了云端那条文案 → 桌面界面上冒出
 #   「**云端部署**已关闭「联网搜例句」」。桌面版没有云端这回事，
-#   评审在桌面版里看到「云端部署」会直接判定这作品没做完。
+#   用户在桌面版里看到「云端部署」会直接以为这功能没做完。
 os.environ.pop("ENPRACTICE_MODE", None)
 os.environ["ENPRACTICE_WEB_SEARCH"] = "0"
 desk_reason = cloud.web_search_disabled_reason()
@@ -2568,7 +2568,7 @@ try:
               ("HttpOnly", "SameSite=Lax", "Path=/", "Max-Age=")), _ch_cloud)
     os.environ["ENPRACTICE_COOKIE_SECURE"] = "0"
     _ch_off = cloud.tenant_cookie_header("a" * 32)
-    check("★ B11 ENPRACTICE_COOKIE_SECURE=0 → 显式关掉（内网 http 评审逃生门）",
+    check("★ B11 ENPRACTICE_COOKIE_SECURE=0 → 显式关掉（内网 http 逃生门）",
           "Secure" not in _ch_off.split("; "), _ch_off)
     os.environ.pop("ENPRACTICE_COOKIE_SECURE", None)
 finally:

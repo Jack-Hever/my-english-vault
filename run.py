@@ -154,6 +154,26 @@ def main() -> int:
     try:
         import webview
 
+        # ★ 打开下载开关 ★
+        #   pywebview 的 settings 里 'ALLOW_DOWNLOADS' 默认是 False，
+        #   而 edgechromium 后端的 on_download_starting 在这个开关关闭时
+        #   会直接 `args.Cancel = True` —— 浏览器侧的下载请求被**静默丢弃**：
+        #   不弹框、不落盘、不报错。症状就是「点了导出，什么都没发生」。
+        #   （本项目里三个导出：JSON 备份 / Markdown / Word，全部走
+        #     blob + <a download>，所以在桌面端会一起消失。）
+        #   打开后行为与浏览器一致：弹出系统「另存为」对话框，
+        #   初始目录是 Windows 的 Downloads。
+        #   ★ 为什么可以改 ★
+        #   pywebview 的 settings 是 ImmutableDict：新增 key 抛 KeyError，
+        #   但**已存在的 key 可以直接改**（webview/util.py 的 __setitem__）。
+        #   'ALLOW_DOWNLOADS' 本来就在默认表里，所以这行合法。
+        #   ★ 必须在 webview.start() 之前设置 ★
+        #   edgechromium 后端在 start() 时按当前值注册下载事件处理器。
+        try:
+            webview.settings['ALLOW_DOWNLOADS'] = True
+        except Exception:
+            _log("设置 ALLOW_DOWNLOADS 失败（导出功能将不可用）")
+
         _log(f"webview 后端：{getattr(webview, 'render_mode', 'unknown')}")
         webview.create_window(
             WINDOW_TITLE,

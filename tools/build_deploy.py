@@ -8,7 +8,7 @@
   · `tenants/`（所有访客的独立库）
   · `dist/` 里的 49MB exe
   · `test_*.py` / `qa_*.js` / `shot_*.js` 等开发脚本
-大赛规则明令「不得包含个人信息」，上面任何一项泄漏都是直接取消资格。
+「不得包含个人信息」是硬要求，上面任何一项泄漏都是安全事故。
 
 ★ 部署目录里**必须**有的最小集 ★
   `app/`（整包，含 seed_data.py）+ `web/` + `web_server.py` + `requirements-web.txt`
@@ -36,15 +36,21 @@ FORBIDDEN_NAMES = {
     "users.db", "auth.json", ".env",
 }
 FORBIDDEN_DIR_PARTS = {
-    "tenants", "__pycache__", ".git", ".workbuddy", "dist", "build",
-    "node_modules", ".pytest_cache", ".mypy_cache",
+    "tenants", "__pycache__", "dist", "build",
+    "node_modules",
 }
 
 
 def _is_forbidden(path: Path) -> bool:
     if path.name in FORBIDDEN_NAMES:
         return True
-    return any(part in FORBIDDEN_DIR_PARTS for part in path.parts)
+    if any(part in FORBIDDEN_DIR_PARTS for part in path.parts):
+        return True
+    # ★ 隐藏目录/隐藏文件一律不打包 ★
+    #   本地工具工作区、VCS 元数据、缓存目录、各类编辑器配置 —— 名称可能变，
+    #   但共同点是「以点开头」。仓库里没有任何必须保留的隐藏文件
+    #   （app/ 与 web/ 实测无隐藏文件），所以按形态拦最稳。
+    return any(part.startswith(".") for part in path.parts)
 
 
 def main() -> int:

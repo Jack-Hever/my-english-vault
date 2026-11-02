@@ -27,3 +27,9 @@ requests==2.34.2
 #
 # ★ 注意 ★ 本文件会被 tools/build_deploy.py 复制覆盖 deploy/ 里的同名文件，
 #   所以依赖**只能**在这里改，直接改 deploy/ 那份会被冲掉。
+#
+# ★ python-docx：外刊导出 Word 用 ★
+# 云端版同样提供 /api/articles/{id}/export.docx，所以这条依赖两边都得有。
+# python-docx 自带模板数据文件 docx/templates/default.docx，PyInstaller
+# 打包时必须显式收集（--collect-all docx），否则打包后 Document() 会失败。
+python-docx==1.2.0

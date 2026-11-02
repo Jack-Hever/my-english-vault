@@ -224,6 +224,78 @@ function esc(s) {
 }
 
 /**
+ * 导出完成后的提示文案。
+ *
+ * ★ 为什么桌面端和云端说法不同 ★
+ * 云端跑在真浏览器里：blob + <a download> 直接落进浏览器的下载目录，
+ * 点了就有文件，提示「已导出」是准确的。
+ * 桌面端跑在 pywebview 里：ALLOW_DOWNLOADS 打开后，pywebview 会先弹一个
+ * 系统「另存为」对话框，**文件落在用户自己选的位置**，默认名由对话框决定。
+ * 这时说「已导出」会让人以为文件已经在某个固定目录里了 —— 而用户真正
+ * 需要知道的是「接下来有个保存对话框，选好位置就落盘」。
+ */
+function exportToast(name, extra) {
+  var cloud = !!(window.EnPracticeCloud && window.EnPracticeCloud.isCloud);
+  var head = cloud
+    ? ('已导出 ' + name + (extra ? ('（' + extra + '）') : ''))
+    : ('已生成 ' + name + (extra ? ('（' + extra + '）') : '') + '，请在弹出的保存对话框中选择位置');
+  toast(head, 'ok');
+}
+
+/**
+ * 下载一个「文件型」接口的返回（导出 Markdown / Word 用）。
+ *
+ * ★ 为什么不复用 api() ★
+ * api() 只按 JSON 解析响应体；导出接口返回的是文件字节，必须走 fetch +
+ * blob 才能落成文件。
+ *
+ * ★ 文件名从哪来 ★
+ * 服务端在 Content-Disposition 里给出最终文件名（Word 用文章标题派生，
+ * 含中文），所以这里从响应头解析；解析不到就用调用方给的兜底名。
+ */
+function downloadFile(url, fallbackName) {
+  return fetch(url, { credentials: 'same-origin' })
+    .then(function (res) {
+      if (!res.ok) {
+        return res.text().then(function (text) {
+          var detail = '';
+          try { detail = JSON.parse(text).detail || ''; } catch (e) { detail = ''; }
+          throw new Error(detail || ('HTTP ' + res.status));
+        });
+      }
+      var name = filenameFromDisposition(res.headers.get('Content-Disposition'), fallbackName);
+      return res.blob().then(function (blob) { return { blob: blob, name: name }; });
+    })
+    .then(function (r) {
+      var link = document.createElement('a');
+      link.href = URL.createObjectURL(r.blob);
+      link.download = r.name;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setTimeout(function () { URL.revokeObjectURL(link.href); }, 1000);
+      exportToast(r.name);
+    })
+    .catch(function (err) { toast('导出失败：' + err.message, 'error'); });
+}
+
+/** 从 Content-Disposition 里取文件名。
+ *  优先 RFC 5987 的 filename*（含中文时靠它才不乱码），其次普通 filename，
+ *  都取不到就用 fallback。 */
+function filenameFromDisposition(disposition, fallback) {
+  if (!disposition) return fallback;
+  var star = /filename\*\s*=\s*UTF-8''([^;]+)/i.exec(disposition);
+  if (star) {
+    try {
+      return decodeURIComponent(star[1].trim().replace(/^"|"$/g, ''));
+    } catch (e) { /* 编码坏了就落到下面的普通 filename */ }
+  }
+  var plain = /filename\s*=\s*"([^"]*)"/i.exec(disposition);
+  if (plain && plain[1]) return plain[1];
+  return fallback;
+}
+
+/**
  * 洗出一个能安全放进 href 的 URL：只放行 http/https（含协议相对 //），
  * 其余一律返回空串。
  *
@@ -921,7 +993,7 @@ function buildStars(options) {
   function setImporting(flag) {
     state.importing = flag;
     $('v-import').disabled = flag;
-    $('v-import').textContent = flag ? '导入中…' : '导入';
+    $('v-import').textContent = flag ? '导入中…' : '导入 JSON 备份';
     // 保存按钮在导入期间一并禁用：导入长时间持有写锁，此时保存会失败
     $('f-save').disabled = flag || state.saving;
   }
@@ -1465,9 +1537,13 @@ function buildStars(options) {
         link.click();
         document.body.removeChild(link);
         setTimeout(function () { URL.revokeObjectURL(link.href); }, 1000);
-        toast('已导出 ' + data.count + ' 条条目', 'ok');
+        exportToast(link.download, data.count + ' 条条目');
       })
       .catch(function (err) { toast('导出失败：' + err.message, 'error'); });
+  }
+
+  function doExportMarkdown() {
+    downloadFile('/api/entries/export.md', 'enpractice-entries.md');
   }
 
   function doImport(file) {
@@ -1534,6 +1610,7 @@ function buildStars(options) {
   });
   $('v-new').addEventListener('click', function () { openForm(null); });
   $('v-export').addEventListener('click', doExport);
+  $('v-export-md').addEventListener('click', doExportMarkdown);
   $('v-import').addEventListener('click', function () { $('v-file').click(); });
   $('v-file').addEventListener('change', function () {
     if (this.files && this.files[0]) doImport(this.files[0]);
@@ -1901,7 +1978,13 @@ function buildStars(options) {
   }
 
   /** 外刊模块 · 文章详情（id = 文章 id）。注意与词汇模块的 openDetail(item) 区分开——同名会互相覆盖。 */
+  // 当前打开的外刊详情对应的文章 id：导出 Word 要用。
+  // 放在模块级而不是函数内，是因为「导出 Word」按钮在弹窗里，
+  // 点击时并不在 openArticleDetail 的调用栈里。
+  var currentDetailArticleId = null;
+
   function openArticleDetail(id) {
+    currentDetailArticleId = id;
     api('/api/articles/' + id)
       .then(function (art) {
         return api('/api/articles/' + id + '/sentences').then(function (list) {
@@ -1963,6 +2046,11 @@ function buildStars(options) {
       .catch(function (err) { toast('加载失败：' + err.message, 'error'); });
   }
 
+  function doExportArticleDocx() {
+    if (!currentDetailArticleId) { toast('请先打开一篇文章', 'error'); return; }
+    downloadFile('/api/articles/' + currentDetailArticleId + '/export.docx', 'article.docx');
+  }
+
   function removeArticle(id) {
     api('/api/articles/' + id, { method: 'DELETE' })
       .then(function () {
@@ -1979,6 +2067,7 @@ function buildStars(options) {
   $('a-new').addEventListener('click', function () { openForm(null); });
   $('a-f-cancel').addEventListener('click', closeForm);
   $('a-f-save').addEventListener('click', submitForm);
+  $('a-detail-export').addEventListener('click', doExportArticleDocx);
   $('a-detail-close').addEventListener('click', function () { $('a-detail').hidden = true; });
 
   $('a-body').addEventListener('click', function (e) {
@@ -2113,7 +2202,7 @@ function buildStars(options) {
       if (cloud) {
         // ★ 云端：正向说明 + 一个能点的入口 ★
         //   访客在公网 demo 上普遍没有 key（平台不提供公共 key），原文案
-        //   「未配置 AI 密钥，译文与评分均为占位内容」会让评审第一眼觉得是半成品。
+        //   「未配置 AI 密钥，译文与评分均为占位内容」会让用户第一眼觉得是半成品。
         //   改成「现在就能用 / 配了会怎样」的说法，并把入口摆在提示里。
         //   ★ 译文不再是占位中文 ★：mock 模式原样给英文原句（见 app/ai.py
         //     _mock_translate），所以这里说「原句自行对照」，不说「示例译文」——
@@ -2317,7 +2406,7 @@ function buildStars(options) {
     // ★ 说明文字优先用后端给的 prac.web_search_note ★
     //   后端知道自己到底做了什么（搜了但没搜到 / 出网已关 / 搜索链路挂了），
     //   前端自己编一句「已自动去网络搜索」在云端就是**不实描述**——
-    //   云端根本没发出任何搜索请求，评审读到会以为功能坏了或他网速有问题。
+    //   云端根本没发出任何搜索请求，用户读到会以为功能坏了或网速有问题。
     //   不按云端/桌面临床分支：后端给不给说明本身就是判据。
     var miss = prac.missing_terms || [];
     $('p-missing').hidden = !miss.length;
@@ -3619,10 +3708,10 @@ function buildStars(options) {
         //   （app/cloud.py 的 tenants/<tid>.cleared，**必须在访客目录之外**），
         //   所以下次请求建的是一份**空库**（有 schema、无演示语料），
         //   不会「删了又长出来」。
-        //   光说「已清空」，隐私敏感的评审会读成「删了但没删干净」——
+        //   光说「已清空」，隐私敏感的用户会读成「删了但没删干净」——
         //   页面刷新一下又「有数据了」，像是没删成功。
         //   把「你的数据没了」和「这里现在是空的、可以自己加」分开说，
-        //   别让评审自己去猜。
+        //   别让用户自己去猜。
         toast('已删除你的全部数据；此处将保持为空库，'
           + '你可以自己添加词条和文章。', 'ok', 6000);
         // ★ 6 秒后才刷新 ★

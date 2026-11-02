@@ -4,7 +4,7 @@
 
 ★ 为什么必须是「闸门」而不是「提示」 ★
 云端部署产物（deploy/）或仓库里一旦混进一把**真实**的 API 密钥，
-它就会跟着 git 仓库、评审截图、投稿材料一起流出去。密钥泄露的代价不是
+它就会跟着 git 仓库、截图、分享材料一起流出去。密钥泄露的代价不是
 「改一下就好」，而是「必须轮换」。所以这里的约定是：
 
     命中 → 退出码非 0 → 构建中断。
@@ -54,11 +54,12 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # 扫描范围
 # ---------------------------------------------------------------------------
 
-#: 整目录跳过：版本库元数据、依赖目录、字节码缓存、工具工作区。
+#: 整目录跳过：依赖目录、字节码缓存、虚拟环境、运行时产物。
+#: ★ 另外：所有以 "." 开头的隐藏目录一律跳过（见 _iter_text_files）——
+#:   本地工具工作区、VCS 元数据、缓存目录、编辑器配置都归这一类，
+#:   名称可能随工具变，但「点开头」这个形态是稳定的。
 _SKIP_DIRS = frozenset({
-    ".git", ".hg", ".svn", "__pycache__", "node_modules", ".workbuddy",
-    ".pytest_cache", ".mypy_cache", ".ruff_cache", ".idea", ".vscode",
-    ".venv", "venv", "site-packages", "tenants", ".eggs",
+    "__pycache__", "node_modules", "venv", "site-packages", "tenants",
 })
 
 #: 按后缀认作文本的文件类型。
@@ -210,9 +211,10 @@ def _iter_text_files(roots):
                 yield root
             continue
         for dirpath, dirnames, filenames in os.walk(root):
+            # ★ 隐藏目录一律跳过（本地工具工作区 / VCS 元数据 / 缓存 / 编辑器配置）★
             dirnames[:] = sorted(
                 d for d in dirnames
-                if d not in _SKIP_DIRS and not d.startswith(".git")
+                if d not in _SKIP_DIRS and not d.startswith(".")
             )
             for name in sorted(filenames):
                 path = Path(dirpath) / name

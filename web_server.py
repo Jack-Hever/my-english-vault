@@ -68,7 +68,7 @@ def _bootstrap_env() -> None:
     #   web_search_enabled() 在云端恒返回 False），环境变量一律无效。
     #   所以这里连 setdefault 都不写 —— 写一个「设了也没用」的开关，
     #   等于在下一个人心里埋下「我改改 env 就能开」的雷。
-    #   真要开，必须改代码（走一次有评审记录的显式改动）。
+    #   真要开，必须改代码（走一次有留痕记录的显式改动）。
     if not os.environ.get("ENPRACTICE_HOME"):
         # 优先用可写的挂载卷（部署平台的惯例是 /data）；都不行才退到临时目录。
         for cand in ("/data",
